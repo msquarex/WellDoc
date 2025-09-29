@@ -19,6 +19,10 @@ MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 
+# Chunking configuration (from .env or defaults)
+MAX_TOKENS = int(os.getenv("CHUNK_MAX_TOKENS", 500))
+OVERLAP = int(os.getenv("CHUNK_OVERLAP", 50))
+
 if not PDF_DIRECTORY:
     raise ValueError("PDF_DIRECTORY is not set in .env file")
 
@@ -41,7 +45,6 @@ cursor = conn.cursor()
 
 # ---------- Table Creation ----------
 def ensure_pdf_chunks_table_exists():
-    """Create pdf_chunks table if it does not exist."""
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pdf_chunks (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -88,7 +91,6 @@ def calculate_sha256_from_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 def extract_blocks_from_pdf(pdf_bytes):
-    """Extract text blocks with page numbers from PDF."""
     pdf_document = fitz.open("pdf", pdf_bytes)
     results = []
     for page_number, page in enumerate(pdf_document, start=1):
@@ -105,7 +107,6 @@ def extract_blocks_from_pdf(pdf_bytes):
     return results
 
 def extract_text_from_docx(path):
-    """Extract text blocks from a DOCX file."""
     doc = docx.Document(path)
     results = []
     for i, para in enumerate(doc.paragraphs, start=1):
@@ -115,7 +116,6 @@ def extract_text_from_docx(path):
     return results
 
 def extract_text_from_doc(path):
-    """Extract text from legacy DOC using textract."""
     text = textract.process(path).decode("utf-8")
     paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
     return [{"page_number": i+1, "text": p} for i, p in enumerate(paragraphs)]
@@ -124,11 +124,7 @@ def split_with_spacy(text):
     doc = nlp(text)
     return [sent.text.strip() for sent in doc.sents if sent.text.strip()]
 
-def regroup_sentences(sentences, max_tokens=500, overlap=50):
-    """
-    Regroup sentences into chunks with max ~600 tokens,
-    keeping ~100 word overlap.
-    """
+def regroup_sentences(sentences, max_tokens=MAX_TOKENS, overlap=OVERLAP):
     chunks, current_chunk, word_count = [], [], 0
     i = 0
     while i < len(sentences):
@@ -194,7 +190,7 @@ def process_all_files_from_directory(data_dir):
         processed_chunks = []
         for block in blocks:
             sentences = split_with_spacy(block["text"])
-            sentence_chunks = regroup_sentences(sentences, max_tokens=600, overlap=100)
+            sentence_chunks = regroup_sentences(sentences, max_tokens=MAX_TOKENS, overlap=OVERLAP)
 
             for chunk_text in sentence_chunks:
                 processed_chunks.append({
